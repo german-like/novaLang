@@ -6,12 +6,52 @@ import re
 variables = {}
 functions = {}
 models = {}
+builtin_methods = {
+
+    "int": {
+        "toStr": lambda v: str(v)
+    },
+
+    "bool": {
+        "toStr": lambda v: str(v)
+    },
+
+    "str": {
+        "len": lambda v: len(v)
+    }
+
+}
 
 # -----------------------------
 # Utilities
 # -----------------------------
 
+# method call
+if "." in expr:
+
+    obj_part, method_part = expr.split(".",1)
+
+    obj = eval_expr(obj_part)
+
+    method = method_part.split("(")[0]
+
+    return call_method(obj, method)
+
 def eval_expr(expr):
+
+    # Model instance  Person(20)
+    m = re.match(r"model (\w+)\((.*?)\)(?: extends (\w+))?:", line)
+
+    if m and m.group(1) in models:
+
+        name = m.group(1)
+        args = []
+
+        if m.group(2).strip():
+            args = [eval_expr(x) for x in m.group(2).split(",")]
+
+    return create_instance(name, args)
+    
     expr = expr.strip()
 
     # replace variables
@@ -20,6 +60,20 @@ def eval_expr(expr):
 
     return eval(expr)
 
+    # method chain
+    if "." in expr:
+
+        parts = expr.split(".")
+
+        value = eval_expr(parts[0])
+
+        for p in parts[1:]:
+
+            name = p.split("(")[0]
+
+            value = call_method(value, name)
+
+        return value
 
 def extract_block(lines, start):
     block = []
@@ -83,8 +137,8 @@ def define_model(name, args, body):
         "args": args,
         "fields": fields,
         "methods": methods,
+        "parent": parent
     }
-
 
 def create_instance(name, arg_values):
 
@@ -110,15 +164,43 @@ def create_instance(name, arg_values):
 
 def call_method(obj, method):
 
-    model = models[obj.__dict__["_NovaObject__model"]]
+    # builtin types
+    if type(obj).__name__ in builtin_methods:
 
-    body = model["methods"][method]
+        t = type(obj).__name__
+
+        if method in builtin_methods[t]:
+            return builtin_methods[t][method](obj)
+
+    # model method
+    model_name = obj.__dict__["_NovaObject__model"]
+
+    while model_name:
+
+        model = models[model_name]
+
+        if method in model["methods"]:
+            body = model["methods"][method]
+            break
+
+        model_name = model["parent"]
+
+    backup = variables.copy()
 
     for k in obj.__dict__:
         variables[k] = obj.__dict__[k]
 
-    run_block(body)
+    try:
+        run_block(body)
+        result = obj
+    except StopIteration as r:
+        result = r.value
 
+    variables.clear()
+    variables.update(backup)
+
+    return result
+    
 # -----------------------------
 # Function system
 # -----------------------------
@@ -137,11 +219,16 @@ def call_function(name, params):
     for a, v in zip(args, params):
         variables[a] = v
 
-    run_block(body)
+    try:
+        run_block(body)
+        result = None
+    except StopIteration as r:
+        result = r.value
 
     variables.clear()
     variables.update(backup)
 
+    return result
 # -----------------------------
 # Execution
 # -----------------------------
@@ -250,6 +337,17 @@ def run_block(block):
             define_model(name, args, inner)
 
             i = end
+
+        elif line.startswith("return"):
+
+            expr = line.replace("return","").strip()
+
+            if expr == "":
+                raise StopIteration(None)
+
+            val = eval_expr(expr)
+
+        raise StopIteration(val)
 
         i += 1
 
