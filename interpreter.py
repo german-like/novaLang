@@ -140,6 +140,20 @@ def define_model(name, args, body):
         "parent": parent
     }
 
+def collect_fields(model_name):
+
+    fields = {}
+
+    while model_name:
+
+        model = models[model_name]
+
+        fields.update(model["fields"])
+
+        model_name = model["parent"]
+
+    return fields
+
 def create_instance(name, arg_values):
 
     model = models[name]
@@ -149,9 +163,11 @@ def create_instance(name, arg_values):
     for a, v in zip(model["args"], arg_values):
         local[a] = v
 
+    fields_def = collect_fields(name)
+
     fields = {}
 
-    for k, expr in model["fields"].items():
+    for k, expr in fields_def.items():
         val = expr
 
         for var in local:
